@@ -128,22 +128,23 @@ int Classification::ProcessData()
 {
 	int diffHT;
 
-	diffHT = (headQue + QueueSize - tailQue) % QueueSize;
+	diffHT = (headQue + QueueSize - tailQue_I) % QueueSize;
 	while(diffHT >= DataProcSize)
 	{
+		// calculate FFT for DataProcSize (ex. 500ms)
 		for(int channel_index=0; channel_index<nChannel; ++channel_index)
 		{
 			double inBuff[DataProcSize];
 
 			// move moving window(data queue) to input buffer
-			if(tailQue + DataProcSize <= QueueSize)
+			if(tailQue_I + DataProcSize <= QueueSize)
 			{
-				memcpy(inBuff, &queData[channel_index][tailQue], sizeof(double) * DataProcSize);
+				memcpy(inBuff, &queData[channel_index][tailQue_I], sizeof(double) * DataProcSize);
 			}
 			else
 			{
-				int nTail = QueueSize - tailQue;
-				memcpy(inBuff, &queData[channel_index][tailQue], sizeof(double) * nTail);
+				int nTail = QueueSize - tailQue_I;
+				memcpy(inBuff, &queData[channel_index][tailQue_I], sizeof(double) * nTail);
 				memcpy(&inBuff[nTail], &queData[channel_index][0], sizeof(double) * (DataProcSize-nTail));
 			}
 
@@ -164,11 +165,11 @@ int Classification::ProcessData()
 
 		++idxSpect;
 
-		// when the data ready to calculate spectrogram
+		// when the data ready to make spectrogram (ex. 2s)
 		if(idxSpect == SpectSize)
 		{
 			int cnt;
-			int tmpResult;
+			int classResult;
 			
 		
 			// the first time to make spectrogram -> from the start
@@ -181,37 +182,44 @@ int Classification::ProcessData()
 						for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 						{
 							double sum = 0;
+
+							// reduce frequency dimension (divide into 5bands)
 							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<freqRange[frequency_index][1];++freqBin_index)
 							{
 								sum += fftSpect[channel_index][freqBin_index][time_index];
 							}
 							rdcSpect[channel_index][frequency_index][time_index] = sum / (freqRange[frequency_index][1] - freqRange[frequency_index][0] + 1);
 
+
+							// moving average routine
 							// accumulate spectral power along the time
 							if(time_index == 0)
 								accumSpect[channel_index][frequency_index][time_index] = rdcSpect[channel_index][frequency_index][time_index];
 							else
 								accumSpect[channel_index][frequency_index][time_index] = accumSpect[channel_index][frequency_index][time_index-1] + rdcSpect[channel_index][frequency_index][time_index];
 
-							// 1000ms moving average 
-							if(time_index >= TS_1000ms)
-								accumSpect[channel_index][frequency_index][time_index] -= rdcSpect[channel_index][frequency_index][time_index-TS_1000ms];
+							// 500ms moving average --> baseline
+							if(time_index >= TS_500ms)
+								accumSpect[channel_index][frequency_index][time_index] -= rdcSpect[channel_index][frequency_index][time_index-TS_500ms];
 						}
 					}
 					for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 					{
 						double meanFeature = 0;
-						for(int time_index=0;time_index<NoTime;++time_index)
-						{
-							featureMat[channel_index][frequency_index][time_index] = accumSpect[channel_index][frequency_index][TS_1000ms+(time_index*TS_150ms)] / TS_1000ms;
-							meanFeature += featureMat[channel_index][frequency_index][time_index];
-						}
-						meanFeature /= NoTime;
-						baseMat[channel_index][frequency_index] = meanFeature;
 
+						// making baseline and feature matrix
+						for(int time_index=1;time_index<=NoTime;++time_index)
+						{
+							featureMat[channel_index][frequency_index][time_index] = rdcSpect[channel_index][frequency_index][TS_500ms+(time_index*TS_100ms)];
+							// meanFeature += featureMat[channel_index][frequency_index][time_index];
+						}
+						// meanFeature /= NoTime;
+						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms];
+
+						// normalize feature matrix by log10
 						for(int time_index=0;time_index<NoTime;++time_index)
 						{
-							normMat[channel_index][frequency_index][time_index] = log10(featureMat[channel_index][frequency_index][time_index] / meanFeature);
+							normMat[channel_index][frequency_index][time_index] = log10(featureMat[channel_index][frequency_index][time_index] / baseMat[channel_index][frequency_index]);
 						}
 					}
 				}
@@ -221,11 +229,13 @@ int Classification::ProcessData()
 			{
 				for(int channel_index=0;channel_index<nChannel;++channel_index)
 				{
-					for(int time_index=SpectSize-TS_150ms;time_index<SpectSize;++time_index)
+					for(int time_index=SpectSize-TS_100ms;time_index<SpectSize;++time_index)
 					{
 						for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 						{
 							double sum = 0;
+
+							// reduce frequency dimension
 							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<freqRange[frequency_index][1];++freqBin_index)
 							{
 								sum += fftSpect[channel_index][freqBin_index][time_index];
@@ -235,12 +245,14 @@ int Classification::ProcessData()
 							// accumulate spectral power along the time
 							accumSpect[channel_index][frequency_index][time_index] = accumSpect[channel_index][frequency_index][time_index-1] + rdcSpect[channel_index][frequency_index][time_index];
 							// 1000ms moving average 
-							accumSpect[channel_index][frequency_index][time_index] -= rdcSpect[channel_index][frequency_index][time_index-TS_1000ms];
+							accumSpect[channel_index][frequency_index][time_index] -= rdcSpect[channel_index][frequency_index][time_index-TS_500ms];
 						}
 					}
 					for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 					{
-						featureMat[channel_index][frequency_index][NoTime-1] = accumSpect[channel_index][frequency_index][TS_1000ms+((NoTime-1)*TS_150ms)] / TS_1000ms;
+						// add feature matrix segment
+						featureMat[channel_index][frequency_index][NoTime-1] = rdcSpect[channel_index][frequency_index][TS_500ms+(NoTime*TS_100ms)];
+						// normalize the feature matrix segment
 						normMat[channel_index][frequency_index][NoTime-1] = log10(featureMat[channel_index][frequency_index][NoTime-1] / baseMat[channel_index][frequency_index]);
 					}
 				}				
@@ -249,66 +261,43 @@ int Classification::ProcessData()
 
 			// linearize features (3d->1d, Ch x Time x Freq)
 			nFeatures_base = nChannel * NoTime * NoFreq;
-//			nFeatures_base = idx_base->l;
-//			nFeatures_fn = idx_fn->l;
-//			featureMat_base = new struct svm_node [nFeatures_base + 1];
-//			featureMat_fn = new struct svm_node [nFeatures_fn + 1];
 			featureMat_base = new struct svm_node [nFeatures_base + 1];
 
 			cnt = 0;
 			for(int channel_index=0; channel_index<nChannel; ++channel_index)
 			{
-				for(int freq_index=0; freq_index<NoFreq; ++freq_index)
+				for(int time_index=0; time_index<NoTime; ++time_index)
 				{
-					for(int time_index=0; time_index<NoTime; ++time_index)
+					for(int freq_index=0; freq_index<NoFreq; ++freq_index)
 					{
 						featureMat_base[cnt].index = cnt+1;
-		//				featureMat_base[cnt++].value = normMat[idx_base->coef[idx][0]][idx_base->coef[idx][1]][idx_base->coef[idx][2]];
-						featureMat_base[cnt++].value = featureMat[channel_index][freq_index][time_index];
+						featureMat_base[cnt++].value = normMat[channel_index][freq_index][time_index];
 					}
 				}
 			}
 			featureMat_base[nFeatures_base].value = -1;
-/*
-			cnt = 0;
-			for(int idx=0; idx<nFeatures_base; ++idx)
-			{
-				featureMat_base[cnt].index = cnt+1;
-//				featureMat_base[cnt++].value = normMat[idx_base->coef[idx][0]][idx_base->coef[idx][1]][idx_base->coef[idx][2]];
-				featureMat_base[cnt++].value = featureMat[idx_base->coef[idx][0]][idx_base->coef[idx][1]][idx_base->coef[idx][2]];
-			}
-			featureMat_base[nFeatures_base].value = -1;
 
-			cnt = 0;
-			for(int idx=0; idx<nFeatures_fn; ++idx)
-			{
-				featureMat_fn[cnt].index = cnt+1;
-//				featureMat_fn[cnt++].value = normMat[idx_fn->coef[idx][0]][idx_fn->coef[idx][1]][idx_fn->coef[idx][2]];
-				featureMat_fn[cnt++].value = featureMat[idx_fn->coef[idx][0]][idx_fn->coef[idx][1]][idx_fn->coef[idx][2]];
-			}
-			featureMat_fn[nFeatures_fn].value = -1;
-*/
+
 			// classification
 			// test if the block is baseline or not
-			tmpResult = (int)svm_predict(model_base, featureMat_base);
-			if(tmpResult)
+			classResult = (int)svm_predict(model_base, featureMat_base);
+			if(classResult)
 			{
 				// differentiate face/number
-				tmpResult = (int)svm_predict(model_fn, featureMat_base);
-//				tmpResult = (int)svm_predict(model_fn, featureMat_fn);
+				classResult = (int)svm_predict(model_fn, featureMat_base);
 			}
 
-			++labelCnt[tmpResult];
+			++labelCnt[classResult];
 			if(cntLabels < NoLabel-1)
-			{// voting initiallize
-				recentLabels[cntLabels++] = tmpResult;
+			{// initiallize vote
+				recentLabels[cntLabels++] = classResult;
 				iResult = 0;
 			}
 			else
 			{
 				int labelMax = 0;
 
-				recentLabels[cntLabels] = tmpResult;
+				recentLabels[cntLabels] = classResult;
 				
 				// voting system (more than half, default : neutral) 
 				if(labelCnt[labelMax] < labelCnt[1])
@@ -328,7 +317,6 @@ int Classification::ProcessData()
 			}
 
 			delete featureMat_base;
-//			delete featureMat_fn;
 			
 			
 			// shift 150ms
@@ -336,17 +324,17 @@ int Classification::ProcessData()
 			{
 				for(int frequency_index=0;frequency_index<(int)(FFTSize/2);++frequency_index)
 				{
-					for(int time_index=0;time_index<SpectSize-TS_150ms;++time_index)
+					for(int time_index=0;time_index<SpectSize-TS_100ms;++time_index)
 					{
-						fftSpect[channel_index][frequency_index][time_index] = fftSpect[channel_index][frequency_index][time_index+TS_150ms];
+						fftSpect[channel_index][frequency_index][time_index] = fftSpect[channel_index][frequency_index][time_index+TS_100ms];
 					}
 				}
 				for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 				{
-					for(int time_index=0;time_index<SpectSize-TS_150ms;++time_index)
+					for(int time_index=0;time_index<SpectSize-TS_100ms;++time_index)
 					{
-						rdcSpect[channel_index][frequency_index][time_index] = rdcSpect[channel_index][frequency_index][time_index+TS_150ms];
-						accumSpect[channel_index][frequency_index][time_index] = accumSpect[channel_index][frequency_index][time_index+TS_150ms];
+						rdcSpect[channel_index][frequency_index][time_index] = rdcSpect[channel_index][frequency_index][time_index+TS_100ms];
+						accumSpect[channel_index][frequency_index][time_index] = accumSpect[channel_index][frequency_index][time_index+TS_100ms];
 					}
 					for(int time_index=0;time_index<NoTime-1;++time_index)
 					{
@@ -354,18 +342,15 @@ int Classification::ProcessData()
 					}
 				}
 			}
-			idxSpect -= TS_150ms;
+			idxSpect -= TS_100ms;
 		}
 
 		// shift moving window
 		tailQue += T_50ms;
-		if(tailQue >= QueueSize)
-			tailQue %= QueueSize;
-		diffHT = (headQue + QueueSize - tailQue) % QueueSize;
+		if(tailQue_I >= QueueSize)
+			while((tailQue -= QueueSize) >= QueueSize);
+		diffHT = (headQue + QueueSize - tailQue_I) % QueueSize;
 	}
-
-
-	CString a;
 
 	flagProcess = 1;
 

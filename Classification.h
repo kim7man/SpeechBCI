@@ -4,17 +4,19 @@
 #include "svm.h"
 
 #define SamplingRate	250
-#define DataProcSize	((int)(SamplingRate / 2))	// 125 |250sps
-#define T_50ms			((int)(SamplingRate * 0.05))	// 12 |250sps
-#define TS_1000ms		((int)(SamplingRate / T_50ms))	// 20 |250sps
-#define TS_150ms		((int)(SamplingRate * 0.15 / T_50ms))	// 3 |250sps
-#define QueueSize		300
+#define DataProcSize	((int)(SamplingRate * 0.5))			// 125 |250sps (500ms)
+#define T_50ms			(SamplingRate * 0.05)				// 12.5 |250sps (50ms)
+#define TS_1000ms		((int)(SamplingRate / T_50ms))		// 20 |250sps (1s)
+#define TS_100ms		((int)(TS_1000ms * 0.1))			// 2 |250sps (150ms)
+#define TS_500ms		((int)(TS_1000ms * 0.5))			// 10 |250sps (500ms)
+#define QueueSize		1000
 #define NoChannel		30
 #define NoFreq			5
 #define NoTime			7
 #define NoLabel			7
 #define FFTSize			256
 #define SpectSize		40
+#define tailQue_I		((int)tailQue)
 
 typedef fftw_plan (*pPlan1d)(int, double*, double*, fftw_r2r_kind, unsigned);
 typedef void (*pExecute)(const fftw_plan);
@@ -49,7 +51,7 @@ private:
 	double queData[NoChannel][QueueSize];
 	int nChannel;
 	int headQue;
-	int tailQue;
+	double tailQue;
 
 	// variables for DLL load
 	HINSTANCE hFFTW;
