@@ -40,6 +40,7 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	}
 
 	// set function calls
+//	fftw_plan_r2r_1d = (pPlan1d)GetProcAddress(hFFTW, "fftw_plan_dft_r2c_1d");
 	fftw_plan_r2r_1d = (pPlan1d)GetProcAddress(hFFTW, "fftw_plan_r2r_1d");
 	fftw_execute = (pExecute)GetProcAddress(hFFTW, "fftw_execute");
 
@@ -62,22 +63,22 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	model_base = svm_load_model(modelName_base);
 	model_fn = svm_load_model(modelName_fn);
 
-	strcpy(tmp_base, modelName_base);
-	l_base = strlen(tmp_base)+2;
-	strcpy(tmp_fn, modelName_fn);
-	l_fn = strlen(tmp_fn)+2;
-	for(int i=0;i<6; ++i)
-	{
-		tmp_base[l_base-i] = tmp_base[l_base-i-2];
-		tmp_fn[l_fn-i] = tmp_fn[l_fn-i-2];
-	}
-	tmp_base[l_base-6] = '_';
-	tmp_base[l_base-5] = 'c';
-	tmp_fn[l_fn-6] = '_';
-	tmp_fn[l_fn-5] = 'c';
+	//strcpy(tmp_base, modelName_base);
+	//l_base = strlen(tmp_base)+2;
+	//strcpy(tmp_fn, modelName_fn);
+	//l_fn = strlen(tmp_fn)+2;
+	//for(int i=0;i<6; ++i)
+	//{
+	//	tmp_base[l_base-i] = tmp_base[l_base-i-2];
+	//	tmp_fn[l_fn-i] = tmp_fn[l_fn-i-2];
+	//}
+	//tmp_base[l_base-6] = '_';
+	//tmp_base[l_base-5] = 'c';
+	//tmp_fn[l_fn-6] = '_';
+	//tmp_fn[l_fn-5] = 'c';
 
-	idx_base = svm_load_coeff(tmp_base);
-	idx_fn = svm_load_coeff(tmp_fn);
+	//idx_base = svm_load_coeff(tmp_base);
+	//idx_fn = svm_load_coeff(tmp_fn);
 
 	isFirst = true;
 }
@@ -153,7 +154,7 @@ int Classification::ProcessData()
 			fftw_execute(planFFT);
 
 			// rearrange result FFT & append to spectrogram
-			fftSpect[channel_index][0][idxSpect] = fftOut[0];
+			fftSpect[channel_index][0][idxSpect] = abs(fftOut[0]);
 			for(int frequency_index=1;frequency_index<FFTSize/2;++frequency_index)
 			{
 				double Re = fftOut[frequency_index];
@@ -184,7 +185,7 @@ int Classification::ProcessData()
 							double sum = 0;
 
 							// reduce frequency dimension (divide into 5bands)
-							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<freqRange[frequency_index][1];++freqBin_index)
+							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<=freqRange[frequency_index][1];++freqBin_index)
 							{
 								sum += fftSpect[channel_index][freqBin_index][time_index];
 							}
@@ -205,16 +206,19 @@ int Classification::ProcessData()
 					}
 					for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 					{
-						double meanFeature = 0;
 
 						// making baseline and feature matrix
-						for(int time_index=1;time_index<=NoTime;++time_index)
+						for(int time_index=0;time_index<NoTime;++time_index)
 						{
-							featureMat[channel_index][frequency_index][time_index] = rdcSpect[channel_index][frequency_index][TS_500ms+(time_index*TS_100ms)];
-							// meanFeature += featureMat[channel_index][frequency_index][time_index];
+							double sum = 0;
+							int seg_time = TS_500ms+(time_index*TS_100ms);
+							for(int seg_index=seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+							{
+								 sum += rdcSpect[channel_index][frequency_index][seg_index];
+							}
+							featureMat[channel_index][frequency_index][time_index] = sum / TS_100ms;
 						}
-						// meanFeature /= NoTime;
-						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms];
+						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms-1] / TS_500ms;
 
 						// normalize feature matrix by log10
 						for(int time_index=0;time_index<NoTime;++time_index)
@@ -236,7 +240,7 @@ int Classification::ProcessData()
 							double sum = 0;
 
 							// reduce frequency dimension
-							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<freqRange[frequency_index][1];++freqBin_index)
+							for(int freqBin_index=freqRange[frequency_index][0];freqBin_index<=freqRange[frequency_index][1];++freqBin_index)
 							{
 								sum += fftSpect[channel_index][freqBin_index][time_index];
 							}
@@ -251,7 +255,15 @@ int Classification::ProcessData()
 					for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 					{
 						// add feature matrix segment
-						featureMat[channel_index][frequency_index][NoTime-1] = rdcSpect[channel_index][frequency_index][TS_500ms+(NoTime*TS_100ms)];
+						double sum = 0;
+						int seg_time = TS_500ms+((NoTime-1)*TS_100ms);
+						for(int seg_index = seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+						{
+							sum += rdcSpect[channel_index][frequency_index][seg_index];
+						}
+						featureMat[channel_index][frequency_index][NoTime-1] = sum / TS_100ms;
+						// baseline matrix
+						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms-1] / TS_500ms;
 						// normalize the feature matrix segment
 						normMat[channel_index][frequency_index][NoTime-1] = log10(featureMat[channel_index][frequency_index][NoTime-1] / baseMat[channel_index][frequency_index]);
 					}
@@ -280,7 +292,8 @@ int Classification::ProcessData()
 
 			// classification
 			// test if the block is baseline or not
-			classResult = (int)svm_predict(model_base, featureMat_base);
+//			classResult = (int)svm_predict(model_base, featureMat_base);
+			classResult = 1;
 			if(classResult)
 			{
 				// differentiate face/number
@@ -319,7 +332,7 @@ int Classification::ProcessData()
 			delete featureMat_base;
 			
 			
-			// shift 150ms
+			// shift 100ms
 			for(int channel_index=0;channel_index<nChannel;++channel_index)
 			{
 				for(int frequency_index=0;frequency_index<(int)(FFTSize/2);++frequency_index)
@@ -339,6 +352,7 @@ int Classification::ProcessData()
 					for(int time_index=0;time_index<NoTime-1;++time_index)
 					{
 						featureMat[channel_index][frequency_index][time_index] = featureMat[channel_index][frequency_index][time_index+1];
+						normMat[channel_index][frequency_index][time_index] = normMat[channel_index][frequency_index][time_index+1];
 					}
 				}
 			}
