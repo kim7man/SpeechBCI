@@ -40,7 +40,6 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	}
 
 	// set function calls
-//	fftw_plan_r2r_1d = (pPlan1d)GetProcAddress(hFFTW, "fftw_plan_dft_r2c_1d");
 	fftw_plan_r2r_1d = (pPlan1d)GetProcAddress(hFFTW, "fftw_plan_r2r_1d");
 	fftw_execute = (pExecute)GetProcAddress(hFFTW, "fftw_execute");
 
@@ -62,23 +61,6 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	// load model from file
 	model_base = svm_load_model(modelName_base);
 	model_fn = svm_load_model(modelName_fn);
-
-	//strcpy(tmp_base, modelName_base);
-	//l_base = strlen(tmp_base)+2;
-	//strcpy(tmp_fn, modelName_fn);
-	//l_fn = strlen(tmp_fn)+2;
-	//for(int i=0;i<6; ++i)
-	//{
-	//	tmp_base[l_base-i] = tmp_base[l_base-i-2];
-	//	tmp_fn[l_fn-i] = tmp_fn[l_fn-i-2];
-	//}
-	//tmp_base[l_base-6] = '_';
-	//tmp_base[l_base-5] = 'c';
-	//tmp_fn[l_fn-6] = '_';
-	//tmp_fn[l_fn-5] = 'c';
-
-	//idx_base = svm_load_coeff(tmp_base);
-	//idx_fn = svm_load_coeff(tmp_fn);
 
 	isFirst = true;
 }
