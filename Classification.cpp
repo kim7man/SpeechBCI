@@ -1,5 +1,6 @@
 #include<memory.h>
 #include<math.h>
+#include<string.h>
 
 #include<cstring>
 using namespace std;
@@ -17,8 +18,10 @@ Classification::Classification(void)
 
 Classification::Classification(char* modelName_base, char* modelName_fn)
 {
-	char tmp_base[30], tmp_fn[30];
+	char filename_base[50], filename_fn[50];
+	char *tmpfilename_base, *tmpfilename_fn;
 	int l_base, l_fn;
+	FILE *fp_base, *fp_fn;
 	flagProcess = 0;
 
 	headQue = 0;
@@ -59,9 +62,28 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	}
 
 	// load model from file
-	model_base = svm_load_model(modelName_base);
-	model_fn = svm_load_model(modelName_fn);
+	strcpy(filename_base, modelName_base);
+	strcpy(filename_fn, modelName_fn);
+	model_base = svm_load_model(filename_base);
+	model_fn = svm_load_model(filename_fn);
 
+	tmpfilename_base = strtok(filename_base, ".");
+	strcat(tmpfilename_base, ".txt");
+	tmpfilename_fn = strtok(filename_fn, ".");
+	strcat(tmpfilename_fn, ".txt");
+
+	fp_base = fopen(tmpfilename_base, "rt");
+	fp_fn = fopen(tmpfilename_fn, "rt");
+
+	for(int feat_index=0; feat_index < N_SelFeat; ++feat_index)
+	{
+		fscanf(fp_base, "%d", &featSel_base[feat_index]);
+		fscanf(fp_fn, "%d", &featSel_fn[feat_index]);
+	}
+
+	fclose(fp_base);
+	fclose(fp_fn);
+	
 	isFirst = true;
 }
 
@@ -254,8 +276,12 @@ int Classification::ProcessData()
 
 
 			// linearize features (3d->1d, Ch x Time x Freq)
-			nFeatures_base = nChannel * NoTime * NoFreq;
+			nFeatures_tmp = nChannel * NoTime * NoFreq;
+			nFeatures_base = N_SelFeat;
+			nFeatures_fn = N_SelFeat;
+			featureMat_tmp = new double [nFeatures_tmp];
 			featureMat_base = new struct svm_node [nFeatures_base + 1];
+			featureMat_fn = new struct svm_node [nFeatures_fn + 1];
 
 			cnt = 0;
 			for(int channel_index=0; channel_index<nChannel; ++channel_index)
@@ -264,12 +290,20 @@ int Classification::ProcessData()
 				{
 					for(int freq_index=0; freq_index<NoFreq; ++freq_index)
 					{
-						featureMat_base[cnt].index = cnt+1;
-						featureMat_base[cnt++].value = normMat[channel_index][freq_index][time_index];
+						featureMat_tmp[cnt++] = normMat[channel_index][freq_index][time_index];
 					}
 				}
 			}
+
+			for(int feature_index=0; feature_index < N_SelFeat; ++feature_index)
+			{
+				featureMat_base[feature_index].index = feature_index+1;
+				featureMat_base[feature_index].value = featureMat_tmp[featSel_base[feature_index]];
+				featureMat_fn[feature_index].index = feature_index+1;
+				featureMat_fn[feature_index].value = featureMat_tmp[featSel_fn[feature_index]];
+			}
 			featureMat_base[nFeatures_base].value = -1;
+			featureMat_fn[nFeatures_base].value = -1;
 
 
 			// classification
@@ -279,7 +313,7 @@ int Classification::ProcessData()
 			if(classResult)
 			{
 				// differentiate face/number
-				classResult = (int)svm_predict(model_fn, featureMat_base);
+				classResult = (int)svm_predict(model_fn, featureMat_fn);
 			}
 
 			++labelCnt[classResult];

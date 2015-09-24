@@ -5,8 +5,8 @@
 #include "SpeechBCI.h"
 
 #define N_Coeff 10
-#define N_Data 37
-#define N_Ch 30
+#define N_Data 32
+#define N_Ch 16
 
 
 void main()
@@ -15,7 +15,6 @@ void main()
 	int result;
 	double sampleSeg[N_Ch][N_Data] ;
 	bool eofFlag;
-
 
 	fp = fopen("test_dataset.dat", "rt");
 	fout = fopen("test_result.dat", "w");

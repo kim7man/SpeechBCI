@@ -20,6 +20,7 @@
 #define NoLabel			7
 #define FFTSize			256
 #define SpectSize		40
+#define N_SelFeat		100
 #define tailQue_I		((int)tailQue)
 
 typedef fftw_plan (*pPlan1d)(int, double*, double*, fftw_r2r_kind, unsigned);
@@ -48,7 +49,9 @@ private:
 	// SVM
 	struct svm_model *model_base, *model_fn;
 	struct svm_node *featureMat_base, *featureMat_fn;
-	int nFeatures_base, nFeatures_fn;
+	double *featureMat_tmp;
+	int featSel_base[N_SelFeat], featSel_fn[N_SelFeat];
+	int nFeatures_tmp, nFeatures_base, nFeatures_fn;
 //	struct svm_coeff *idx_base, *idx_fn;
 
 	// data queue
