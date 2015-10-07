@@ -8,6 +8,10 @@ using namespace std;
 #include "Classification.h"
 
 
+const double a[13] = {1,-6.74986612434222, 20.6816848333804, -38.6350580503587, 49.8950151033794, -47.5378229326030, 34.3183052306746, -18.7995025441968, 7.73677111762930, -2.34340252018987, 0.492840603242827, -0.0630345108008912, 0.00406980731467992};
+const double b[13] = {0.0121493449463388, 0, -0.0728960696780330, 0, 0.182240174195082, 0, -0.242986898926777, 0, 0.182240174195082, 0, -0.0728960696780330, 0, 0.0121493449463388};
+
+
 Classification::Classification(void)
 {
 	flagProcess = 0;
@@ -32,6 +36,25 @@ Classification::Classification(char* modelName_base, char* modelName_fn)
 	labelCnt[1] = 0;
 	labelCnt[2] = 0;
 	iResult = 0;
+
+	// initialize freq bin
+	for(int index_freq=0; index_freq<12; ++index_freq)
+	{
+		freqRange[index_freq][0] = index_freq*4;
+		freqRange[index_freq][1] = (index_freq+1)*4-1;
+	}
+	//for(int index_freq=0; index_freq<49; ++index_freq)
+	//{
+	//	freqRange[index_freq][0] = index_freq;
+	//	freqRange[index_freq][1] = index_freq;
+	//}
+
+	//set filter
+	filter = new Filtfilt*[NoChannel];
+	for(int idxChannel=0; idxChannel<NoChannel; ++idxChannel)
+	{
+		filter[idxChannel] = new Filtfilt(13, a, b);
+	}
 
 
 	//load FFT dll file
@@ -91,6 +114,8 @@ Classification::~Classification(void)
 {
 	delete model_base;
 	delete model_fn;
+	
+	
 
 	for(int i=0;i<NoChannel;++i)
 	{
@@ -99,8 +124,10 @@ Classification::~Classification(void)
 			delete fftSpect[i][j];
 		}
 		delete fftSpect[i];
+		delete filter[i];
 	}
 	delete fftSpect;
+	delete filter;
 }
 
 bool Classification::isFinished()
@@ -112,14 +139,26 @@ void Classification::PutData(double *inSegment, int nCh, int nCol)
 {
 	for(int channel_index=0; channel_index<nCh; ++channel_index)
 	{
+		double *filtSegment;
+		filtSegment = new double [nCol];
+
+		//// filter data
+		//filter[channel_index]->calculate(nCol, &inSegment[channel_index*nCol], filtSegment);
+
+		// w/o filtering
+		memcpy(filtSegment, &inSegment[channel_index*nCol], nCol*sizeof(double));
+		
+		
+		// put data into queue
 		if(headQue + nCol < QueueSize)
-			memcpy(&queData[channel_index][headQue], &inSegment[channel_index*nCol], nCol*sizeof(double));
+			memcpy(&queData[channel_index][headQue], filtSegment, nCol*sizeof(double));
 		else
 		{
 			int diff = QueueSize-headQue;
-			memcpy(&queData[channel_index][headQue], &inSegment[channel_index*nCol], diff*sizeof(double));
-			memcpy(&queData[channel_index][0], &inSegment[channel_index*nCol+diff], (nCol-diff)*sizeof(double));
+			memcpy(&queData[channel_index][headQue], filtSegment, diff*sizeof(double));
+			memcpy(&queData[channel_index][0], &filtSegment[diff], (nCol-diff)*sizeof(double));
 		}
+
 	}
 	headQue += nCol;
 	if(headQue >= QueueSize)
@@ -132,6 +171,7 @@ void Classification::PutData(double *inSegment, int nCh, int nCol)
 int Classification::ProcessData()
 {
 	int diffHT;
+	double tmpMax_base, tmpMin_base, tmpMax_fn, tmpMin_fn;
 
 	diffHT = (headQue + QueueSize - tailQue_I) % QueueSize;
 	while(diffHT >= DataProcSize)
@@ -212,16 +252,29 @@ int Classification::ProcessData()
 					{
 
 						// making baseline and feature matrix
+
+						//for(int time_index=0;time_index<NoTime;++time_index)
+						//{
+						//	double sum = 0;
+						//	int seg_time = TS_500ms+(time_index*TS_100ms);
+						//	for(int seg_index=seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+						//	{
+						//		 sum += rdcSpect[channel_index][frequency_index][seg_index];
+						//	}
+						//	featureMat[channel_index][frequency_index][time_index] = sum / TS_100ms;
+						//}
+
 						for(int time_index=0;time_index<NoTime;++time_index)
 						{
 							double sum = 0;
-							int seg_time = TS_500ms+(time_index*TS_100ms);
-							for(int seg_index=seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+							int seg_time = TS_500ms+(6*TS_100ms);
+							for(int seg_index=seg_time; seg_index < seg_time+(6*TS_100ms); ++seg_index)
 							{
-								 sum += rdcSpect[channel_index][frequency_index][seg_index];
+								sum += rdcSpect[channel_index][frequency_index][seg_index];
 							}
-							featureMat[channel_index][frequency_index][time_index] = sum / TS_100ms;
+							featureMat[channel_index][frequency_index][time_index] = sum / (6*TS_100ms);
 						}
+
 						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms-1] / TS_500ms;
 
 						// normalize feature matrix by log10
@@ -259,13 +312,23 @@ int Classification::ProcessData()
 					for(int frequency_index=0;frequency_index<NoFreq;++frequency_index)
 					{
 						// add feature matrix segment
+
+						//double sum = 0;
+						//int seg_time = TS_500ms+((NoTime-1)*TS_100ms);
+						//for(int seg_index = seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+						//{
+						//	sum += rdcSpect[channel_index][frequency_index][seg_index];
+						//}
+						//featureMat[channel_index][frequency_index][NoTime-1] = sum / (TS_100ms);
+
 						double sum = 0;
-						int seg_time = TS_500ms+((NoTime-1)*TS_100ms);
-						for(int seg_index = seg_time; seg_index < seg_time+TS_100ms; ++seg_index)
+						int seg_time = TS_500ms+(6*TS_100ms);
+						for(int seg_index = seg_time; seg_index < seg_time+(6*TS_100ms); ++seg_index)
 						{
 							sum += rdcSpect[channel_index][frequency_index][seg_index];
 						}
-						featureMat[channel_index][frequency_index][NoTime-1] = sum / TS_100ms;
+						featureMat[channel_index][frequency_index][NoTime-1] = sum / (6*TS_100ms);
+
 						// baseline matrix
 						baseMat[channel_index][frequency_index] = accumSpect[channel_index][frequency_index][TS_500ms-1] / TS_500ms;
 						// normalize the feature matrix segment
@@ -295,55 +358,78 @@ int Classification::ProcessData()
 				}
 			}
 
+
+			// extract selected (high)features
+			tmpMax_base = normMat[0][0][0];
+			tmpMin_base = tmpMax_base;
+			tmpMax_fn = tmpMax_base;
+			tmpMin_fn = tmpMax_base;
 			for(int feature_index=0; feature_index < N_SelFeat; ++feature_index)
 			{
 				featureMat_base[feature_index].index = feature_index+1;
 				featureMat_base[feature_index].value = featureMat_tmp[featSel_base[feature_index]];
 				featureMat_fn[feature_index].index = feature_index+1;
 				featureMat_fn[feature_index].value = featureMat_tmp[featSel_fn[feature_index]];
+				if(tmpMax_base < featureMat_base[feature_index].value) tmpMax_base = featureMat_base[feature_index].value;
+				if(tmpMin_base > featureMat_base[feature_index].value) tmpMin_base = featureMat_base[feature_index].value;
+				if(tmpMax_fn < featureMat_fn[feature_index].value) tmpMax_fn = featureMat_fn[feature_index].value;
+				if(tmpMin_fn > featureMat_fn[feature_index].value) tmpMin_fn = featureMat_fn[feature_index].value;
 			}
 			featureMat_base[nFeatures_base].value = -1;
 			featureMat_fn[nFeatures_base].value = -1;
+			tmpMax_base -= tmpMin_base;
+			tmpMax_fn -= tmpMin_fn;
 
+
+			// feature normalization (to -1~1) : ((feat - min) / max) * 2 - 1 
+			for(int feature_index=0; feature_index < N_SelFeat; ++feature_index)
+			{
+				featureMat_base[feature_index].value = (featureMat_base[feature_index].value - tmpMin_base) / tmpMax_base * 2 - 1;
+				featureMat_fn[feature_index].value = (featureMat_fn[feature_index].value - tmpMin_fn) / tmpMax_fn * 2 - 1;
+			}
 
 			// classification
 			// test if the block is baseline or not
-//			classResult = (int)svm_predict(model_base, featureMat_base);
-			classResult = 1;
+			classResult = (int)svm_predict(model_base, featureMat_base);
+			//classResult = 1;
 			if(classResult)
 			{
 				// differentiate face/number
 				classResult = (int)svm_predict(model_fn, featureMat_fn);
 			}
 
-			++labelCnt[classResult];
-			if(cntLabels < NoLabel-1)
-			{// initiallize vote
-				recentLabels[cntLabels++] = classResult;
-				iResult = 0;
-			}
-			else
-			{
-				int labelMax = 0;
 
-				recentLabels[cntLabels] = classResult;
-				
-				// voting system (more than half, default : neutral) 
-				if(labelCnt[labelMax] < labelCnt[1])
-					labelMax = 1;
-				if(labelCnt[labelMax] < labelCnt[2])
-					labelMax = 2;
-				if(labelCnt[labelMax] < NoLabel/2)
-					labelMax = 0;
-				iResult = labelMax;
+			//// result voting
+			//++labelCnt[classResult];
+			//if(cntLabels < NoLabel-1)
+			//{// initiallize vote
+			//	recentLabels[cntLabels++] = classResult;
+			//	iResult = 0;
+			//}
+			//else
+			//{
+			//	int labelMax = 0;
 
-				// shift labels for next use
-				labelCnt[recentLabels[0]]--;
-				for(int label_index=0;label_index<NoLabel-1;++label_index)
-				{
-					recentLabels[label_index] = recentLabels[label_index+1];
-				}
-			}
+			//	recentLabels[cntLabels] = classResult;
+			//	
+			//	// voting system (more than half, default : neutral) 
+			//	if(labelCnt[labelMax] < labelCnt[1])
+			//		labelMax = 1;
+			//	if(labelCnt[labelMax] < labelCnt[2])
+			//		labelMax = 2;
+			//	if(labelCnt[labelMax] < NoLabel/2)
+			//		labelMax = 0;
+			//	iResult = labelMax;
+
+			//	// shift labels for next use
+			//	labelCnt[recentLabels[0]]--;
+			//	for(int label_index=0;label_index<NoLabel-1;++label_index)
+			//	{
+			//		recentLabels[label_index] = recentLabels[label_index+1];
+			//	}
+			//}
+
+			iResult = classResult;
 
 			delete featureMat_base;
 			
